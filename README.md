@@ -3,14 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Space Shooter</title>
+    <title>Pseudo-3D Space Shooter</title>
     <style>
-        body {
+        html, body {
             margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
             overflow: hidden;
-            background-color: #000;
+            background-color: #020208;
             font-family: 'Courier New', Courier, monospace;
             user-select: none;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
         }
         #hud {
             position: absolute;
@@ -21,7 +29,6 @@
             font-weight: bold;
             pointer-events: none;
             text-shadow: 0 0 8px rgba(0,255,220,0.6);
-            line-height: 1.5;
         }
         #gameover-screen {
             position: absolute;
@@ -31,17 +38,15 @@
             color: #ff0055;
             text-align: center;
             display: none;
-            pointer-events: none;
-            background: rgba(0, 0, 0, 0.85);
-            padding: 30px;
+            background: rgba(5, 5, 15, 0.95);
+            padding: 35px;
             border: 2px solid #ff0055;
             border-radius: 10px;
-            box-shadow: 0 0 20px rgba(255, 0, 85, 0.4);
+            box-shadow: 0 0 25px rgba(255, 0, 85, 0.5);
         }
         #gameover-screen h1 { font-size: 50px; margin: 0 0 10px 0; }
         #gameover-screen p { color: #fff; font-size: 20px; margin: 5px 0; }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
@@ -54,243 +59,173 @@
         <h1>GAME OVER</h1>
         <p id="final-score">Final Score: 0</p>
         <p id="high-score-notice" style="color: #00ffcc; font-weight: bold; display: none;">NEW HIGH SCORE!</p>
-        <p style="font-size: 16px; color: #888; margin-top: 20px;">Click anywhere to restart</p>
+        <p style="font-size: 16px; color: #888; margin-top: 20px; font-weight: bold;">CLICK ANYWHERE TO RESTART</p>
     </div>
 
+    <canvas id="gameCanvas"></canvas>
+
 <script>
-// --- Setup Scene, Camera, and Renderer ---
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
 
-// --- Lighting ---
-const ambientLight = new THREE.AmbientLight(0x333333);
-scene.add(ambientLight);
-
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-directionalLight.position.set(5, 10, 7);
-scene.add(directionalLight);
+// Resize canvas to fit window
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
 
 // --- Game Variables ---
 let score = 0;
-let highScore = localStorage.getItem("spaceracer_highscore") ? parseInt(localStorage.getItem("spaceracer_highscore")) : 0;
+let highScore = 0; // Local variable bypasses Tracking Prevention storage blocks
 let gameOver = false;
+let spawnTimer = 0;
+
+const mouse = { x: canvas.width / 2, y: canvas.height / 2 };
+const stars = [];
 const lasers = [];
 const asteroids = [];
-const mouse = { x: 0, y: 0 };
 
-// Initialize High Score HUD
-document.getElementById('high-score-hud').innerText = highScore;
-
-// --- Create Starfield Background ---
-const starGeometry = new THREE.BufferGeometry();
-const starCount = 500;
-const starPositions = new Float32Array(starCount * 3);
-for(let i = 0; i < starCount * 3; i += 3) {
-    starPositions[i] = (Math.random() - 0.5) * 100;       
-    starPositions[i+1] = (Math.random() - 0.5) * 100;     
-    starPositions[i+2] = -Math.random() * 200;            
+// Initialize 3D depth stars
+for (let i = 0; i < 200; i++) {
+    stars.push({
+        x: (Math.random() - 0.5) * canvas.width * 2,
+        y: (Math.random() - 0.5) * canvas.height * 2,
+        z: Math.random() * canvas.width
+    });
 }
-starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.5 });
-const starField = new THREE.Points(starGeometry, starMaterial);
-scene.add(starField);
 
-// --- Create Player Ship ---
-const playerGroup = new THREE.Group();
-
-const hullGeo = new THREE.ConeGeometry(0.6, 2.5, 4);
-hullGeo.rotateX(Math.PI / 2); 
-const hullMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc, roughness: 0.2 });
-const hull = new THREE.Mesh(hullGeo, hullMat);
-playerGroup.add(hull);
-
-const wingGeo = new THREE.BoxGeometry(2.5, 0.1, 0.8);
-const wingMat = new THREE.MeshStandardMaterial({ color: 0x0088cc });
-const wings = new THREE.Mesh(wingGeo, wingMat);
-wings.position.set(0, -0.2, -0.2);
-playerGroup.add(wings);
-
-playerGroup.position.set(0, 0, -5); 
-scene.add(playerGroup);
-
-// Camera settings adjusted slightly for better relative alignment
-camera.position.set(0, 2.5, 2.5);
-camera.lookAt(0, 0, -10);
-
-// --- Input Handling ---
+// --- Inputs ---
 window.addEventListener('mousemove', (e) => {
-    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
 });
 
 window.addEventListener('click', () => {
     if (gameOver) {
         resetGame();
-        return;
+    } else {
+        // Fire laser from ship's current screen position
+        lasers.push({
+            x: mouse.x,
+            y: mouse.y,
+            z: 10 // Starts close, flies deep into distance
+        });
     }
-    spawnLaser();
 });
 
-// --- Game Actions ---
-function spawnLaser() {
-    const laserGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.8, 4);
-    laserGeo.rotateX(Math.PI / 2);
-    const laserMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
-    const laser = new THREE.Mesh(laserGeo, laserMat);
-    
-    laser.position.copy(playerGroup.position);
-    laser.position.z -= 1.5; 
-    
-    scene.add(laser);
-    lasers.push(laser);
-}
-
 function spawnAsteroid() {
-    if (gameOver) return;
-
-    const radius = Math.random() * 0.6 + 0.4;
-    const asteroidGeo = new THREE.DodecahedronGeometry(radius, 1);
-    const asteroidMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.9 });
-    const asteroid = new THREE.Mesh(asteroidGeo, asteroidMat);
-
-    asteroid.position.set(
-        (Math.random() - 0.5) * 16,
-        (Math.random() - 0.5) * 11,
-        -50 
-    );
-    
-    asteroid.userData = {
-        rotX: Math.random() * 0.02,
-        rotY: Math.random() * 0.02,
-        speed: Math.random() * 0.15 + 0.1 + (score * 0.002) 
-    };
-
-    scene.add(asteroid);
-    asteroids.push(asteroid);
-
-    setTimeout(spawnAsteroid, Math.max(200, 1000 - score * 5));
-}
-
-function checkCollision(mesh1, mesh2, distanceThreshold) {
-    return mesh1.position.distanceTo(mesh2.position) < distanceThreshold;
-}
-
-function handleGameOver() {
-    gameOver = true;
-    document.getElementById('final-score').innerText = `Final Score: ${score}`;
-    
-    if (score > highScore) {
-        highScore = score;
-        localStorage.setItem("spaceracer_highscore", highScore);
-        document.getElementById('high-score-hud').innerText = highScore;
-        document.getElementById('high-score-notice').style.display = 'block';
-    } else {
-        document.getElementById('high-score-notice').style.display = 'none';
-    }
-    
-    document.getElementById('gameover-screen').style.display = 'block';
+    // Spawns deep in the distance (z = canvas.width), flying toward screen
+    asteroids.push({
+        x: (Math.random() - 0.5) * canvas.width * 2,
+        y: (Math.random() - 0.5) * canvas.height * 2,
+        z: canvas.width,
+        size: Math.random() * 30 + 20,
+        speed: Math.random() * 4 + 4 + (score * 0.1)
+    });
 }
 
 function resetGame() {
     score = 0;
     gameOver = false;
-    document.getElementById('current-score').innerText = score;
-    document.getElementById('gameover-screen').style.display = 'none';
-    
-    lasers.forEach(l => scene.remove(l));
-    asteroids.forEach(a => scene.remove(a));
     lasers.length = 0;
     asteroids.length = 0;
-    
-    playerGroup.position.set(0, 0, -5);
-    animate();
+    document.getElementById('current-score').innerText = score;
+    document.getElementById('gameover-screen').style.display = 'none';
 }
 
-// --- Main Animation Loop ---
+// --- Core Game Loop ---
 function animate() {
-    if (gameOver) return; 
-
     requestAnimationFrame(animate);
 
-    // FIXED MATH: Added perspective correction offsets.
-    // The multipliers expand the boundary limits and account for camera angle tilt.
-    const targetX = mouse.x * 7.5;
-    const targetY = (mouse.y * 5.2) + 1.2; // Added constant +1.2 shift to pull it up into crosshair view
-    
-    // Aesthetic bank rolling on turn
-    playerGroup.rotation.z = -(targetX - playerGroup.position.x) * 0.15;
-    playerGroup.rotation.y = (targetX - playerGroup.position.x) * 0.08;
+    // Clear Screen
+    ctx.fillStyle = '#020208';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    playerGroup.position.x = targetX;
-    playerGroup.position.y = targetY;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
 
-    // Starfield movement
-    const positions = starField.geometry.attributes.position.array;
-    for(let i = 2; i < positions.length; i += 3) {
-        positions[i] += 0.5; 
-        if (positions[i] > 0) {
-            positions[i] = -200; 
+    // 1. Draw Starfield (Pseudo-3D Projection)
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < stars.length; i++) {
+        let s = stars[i];
+        s.z -= 2; // Move stars closer
+        if (s.z <= 0) s.z = canvas.width; // Reset deep
+
+        // Project 3D coordinates to 2D Screen
+        let sx = (s.x / s.z) * cx + cx;
+        let sy = (s.y / s.z) * cy + cy;
+        let size = (1 - s.z / canvas.width) * 3;
+
+        if (sx >= 0 && sx <= canvas.width && sy >= 0 && sy <= canvas.height) {
+            ctx.fillRect(sx, sy, size, size);
         }
     }
-    starField.geometry.attributes.position.needsUpdate = true;
 
-    // Update Lasers
+    // 2. Process Lasers (Move into background depth)
     for (let i = lasers.length - 1; i >= 0; i--) {
-        lasers[i].position.z -= 0.7; 
+        let l = lasers[i];
+        l.z += 15; // Move away from player
 
-        if (lasers[i].position.z < -60) {
-            scene.remove(lasers[i]);
+        // Project to screen
+        let lRadius = (1 - l.z / canvas.width) * 8;
+        if (lRadius < 1) lRadius = 1;
+
+        // Draw laser dot traveling outward
+        ctx.fillStyle = '#ff0055';
+        ctx.beginPath();
+        ctx.arc(l.x, l.y, lRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (l.z > canvas.width) {
             lasers.splice(i, 1);
         }
     }
 
-    // Update Asteroids
-    for (let i = asteroids.length - 1; i >= 0; i--) {
-        const ast = asteroids[i];
-        ast.position.z += ast.userData.speed; 
-        ast.rotation.x += ast.userData.rotX;
-        ast.rotation.y += ast.userData.rotY;
-
-        // Collision Check
-        if (checkCollision(playerGroup, ast, 1.1)) {
-            handleGameOver();
-        }
-
-        // Laser Hits
-        for (let j = lasers.length - 1; j >= 0; j--) {
-            if (checkCollision(lasers[j], ast, 0.9)) {
-                scene.remove(ast);
-                scene.remove(lasers[j]);
-                asteroids.splice(i, 1);
-                lasers.splice(j, 1);
-                
-                score += 10;
-                document.getElementById('current-score').innerText = score;
-                break;
-            }
-        }
-
-        if (ast && ast.position.z > 2) {
-            scene.remove(ast);
-            asteroids.splice(i, 1);
+    // 3. Process Asteroids (Move forward toward player)
+    if (!gameOver) {
+        spawnTimer++;
+        let spawnRate = Math.max(15, 45 - score * 0.5);
+        if (spawnTimer > spawnRate) {
+            spawnAsteroid();
+            spawnTimer = 0;
         }
     }
 
-    renderer.render(scene, camera);
-}
+    for (let i = asteroids.length - 1; i >= 0; i--) {
+        let a = asteroids[i];
+        a.z -= a.speed; // Move closer
 
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
+        // 3D Perspective Projection Formulas
+        let ax = (a.x / a.z) * cx + cx;
+        let ay = (a.y / a.z) * cy + cy;
+        let aSize = (1 - a.z / canvas.width) * a.size * 2;
 
-// Run
-spawnAsteroid();
-animate();
-</script>
-</body>
-</html>
+        if (aSize < 0) aSize = 0;
+
+        // Draw Asteroid (Rock outline filled with grey)
+        if (a.z > 0) {
+            ctx.fillStyle = '#55555c';
+            ctx.strokeStyle = '#888893';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(ax, ay, aSize, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Collision check: Lasers hitting Asteroid
+            for (let j = lasers.length - 1; j >= 0; j--) {
+                let l = lasers[j];
+                // Calculate distance on the flat 2D plane
+                let dist = Math.hypot(l.x - ax, l.y - ay);
+                if (dist < aSize && a.z > 100) { // Hit registered
+                    asteroids.splice(i, 1);
+                    lasers.splice(j, 1);
+                    score += 10;
+                    document.getElementById('current-score').innerText = score;
+                    break;
+                }
+            }
+
+            // Collision check: Asteroid hits player
