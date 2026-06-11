@@ -128,16 +128,16 @@ camera.lookAt(0, 0, -10);
 
 // --- Input Handling ---
 window.addEventListener('mousemove', (e) => {
-    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-});
-
-window.addEventListener('click', () => {
-    if (gameOver) {
-        resetGame();
-        return;
-    }
-    spawnLaser();
+    // This fetches the exact pixel bounds of the canvas, ignoring body padding or margins
+    const rect = renderer.domElement.getBoundingClientRect();
+    
+    // Calculates the mouse position strictly relative to the game viewport boundaries
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
+    
+    // Maps the precise coordinates to Three.js normalized 3D space (-1 to 1)
+    mouse.x = (canvasX / rect.width) * 2 - 1;
+    mouse.y = -(canvasY / rect.height) * 2 + 1;
 });
 
 // --- Game Actions ---
