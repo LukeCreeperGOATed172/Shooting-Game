@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Space Shooter - Absolute Alignment Edition</title>
+    <title>3D Space Shooter - Shield-Proof Edition</title>
     <style>
         html, body {
             margin: 0;
@@ -11,11 +11,10 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #000;
+            background-color: #020208;
             font-family: 'Courier New', Courier, monospace;
             user-select: none;
         }
-        /* Forces the game window to ignore GitHub's default layout padding rules */
         canvas {
             position: absolute;
             top: 0;
@@ -46,7 +45,7 @@
             text-align: center;
             display: none;
             pointer-events: auto;
-            background: rgba(0, 0, 0, 0.9);
+            background: rgba(4, 4, 12, 0.95);
             padding: 30px;
             border: 2px solid #ff0055;
             border-radius: 10px;
@@ -57,7 +56,6 @@
         #gameover-screen h1 { font-size: 50px; margin: 0 0 10px 0; }
         #gameover-screen p { color: #fff; font-size: 20px; margin: 5px 0; }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
@@ -73,168 +71,228 @@
         <p style="font-size: 16px; color: #888; margin-top: 20px;">Click anywhere to restart</p>
     </div>
 
+    <canvas id="gameCanvas"></canvas>
+
 <script>
-// --- Core Setup ---
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
 
-// --- Lighting Engine ---
-const ambientLight = new THREE.AmbientLight(0x444444);
-scene.add(ambientLight);
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-directionalLight.position.set(5, 10, 7);
-scene.add(directionalLight);
-
-// --- State Trackers ---
+// --- Game Settings & Core 3D Projection Matrices ---
 let score = 0;
 let highScore = 0; 
 let gameOver = false;
-let asteroidTimer = null;
+let spawnTimer = 0;
 
+const FOV = 350; 
+const PLANE_Z = 30; // Matrix focal plane for alignment targeting
+
+const mouse = { x: 0, y: 0, screenX: window.innerWidth / 2, screenY: window.innerHeight / 2 };
+const stars = [];
 const lasers = [];
 const asteroids = [];
-const mouse = new THREE.Vector2();
-const raycaster = new THREE.Raycaster();
 
-// Anchor an invisible plane at Z = -5. The ship will slide along this flat target grid.
-const movementPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 5);
-const targetWorldPosition = new THREE.Vector3();
-
-// --- Background Assembly ---
-const starGeometry = new THREE.BufferGeometry();
-const starCount = 400;
-const starPositions = new Float32Array(starCount * 3);
-for(let i = 0; i < starCount * 3; i += 3) {
-    starPositions[i] = (Math.random() - 0.5) * 120;       
-    starPositions[i+1] = (Math.random() - 0.5) * 120;     
-    starPositions[i+2] = -Math.random() * 200;            
+// Starfield array mapping
+for (let i = 0; i < 250; i++) {
+    stars.push({
+        x: (Math.random() - 0.5) * 2500,
+        y: (Math.random() - 0.5) * 2000,
+        z: Math.random() * 800
+    });
 }
-starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.5 });
-const starField = new THREE.Points(starGeometry, starMaterial);
-scene.add(starField);
 
-// --- Construct Player Ship Mesh ---
-const playerGroup = new THREE.Group();
-
-const hullGeo = new THREE.ConeGeometry(0.5, 2.2, 4);
-hullGeo.rotateX(Math.PI / 2); 
-const hullMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc, roughness: 0.2 });
-const hull = new THREE.Mesh(hullGeo, hullMat);
-playerGroup.add(hull);
-
-const wingGeo = new THREE.BoxGeometry(2.4, 0.08, 0.7);
-const wingMat = new THREE.MeshStandardMaterial({ color: 0x0088cc });
-const wings = new THREE.Mesh(wingGeo, wingMat);
-wings.position.set(0, -0.15, -0.2);
-playerGroup.add(wings);
-
-playerGroup.position.set(0, 0, -5); 
-scene.add(playerGroup);
-
-// Anchor Camera Properties
-camera.position.set(0, 3.0, 3.5);
-camera.lookAt(0, 0, -8);
-
-// --- Controls Matrix ---
 window.addEventListener('mousemove', (e) => {
-    // Calculates position directly bounded to renderer dimensions rather than standard window windowing
-    const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    const rect = canvas.getBoundingClientRect();
+    mouse.screenX = e.clientX - rect.left;
+    mouse.screenY = e.clientY - rect.top;
+    
+    // RAYCAST SIMULATION: Maps screen space dimensions directly to focal vectors
+    mouse.x = (mouse.screenX - canvas.width / 2) * (PLANE_Z / FOV);
+    mouse.y = (mouse.screenY - canvas.height / 2) * (PLANE_Z / FOV);
 });
 
 window.addEventListener('click', () => {
     if (gameOver) {
         resetGame();
-        return;
+    } else {
+        lasers.push({
+            x: mouse.x,
+            y: mouse.y,
+            z: PLANE_Z,
+            speed: 18
+        });
     }
-    spawnLaser();
 });
 
-// --- Functional Routines ---
-function spawnLaser() {
-    if (gameOver) return;
-    const laserGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.8, 4);
-    laserGeo.rotateX(Math.PI / 2);
-    const laserMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
-    const laser = new THREE.Mesh(laserGeo, laserMat);
-    
-    laser.position.copy(playerGroup.position);
-    laser.position.z -= 1.2; 
-    
-    scene.add(laser);
-    lasers.push(laser);
-}
-
 function spawnAsteroid() {
-    if (gameOver) return;
-
-    const radius = Math.random() * 0.5 + 0.4;
-    const asteroidGeo = new THREE.DodecahedronGeometry(radius, 1);
-    const asteroidMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.9 });
-    const asteroid = new THREE.Mesh(asteroidGeo, asteroidMat);
-
-    asteroid.position.set(
-        (Math.random() - 0.5) * 18,
-        (Math.random() - 0.5) * 12,
-        -60 
-    );
-    
-    asteroid.userData = {
-        rotX: Math.random() * 0.02,
-        rotY: Math.random() * 0.02,
-        speed: Math.random() * 0.12 + 0.12 + (score * 0.003) 
-    };
-
-    scene.add(asteroid);
-    asteroids.push(asteroid);
-
-    asteroidTimer = setTimeout(spawnAsteroid, Math.max(200, 1000 - score * 5));
-}
-
-function handleGameOver() {
-    gameOver = true;
-    clearTimeout(asteroidTimer); 
-    document.getElementById('final-score').innerText = `Final Score: ${score}`;
-    
-    if (score > highScore) {
-        highScore = score;
-        document.getElementById('high-score-hud').innerText = highScore;
-        document.getElementById('high-score-notice').style.display = 'block';
-    } else {
-        document.getElementById('high-score-notice').style.display = 'none';
-    }
-    
-    document.getElementById('gameover-screen').style.display = 'block';
+    asteroids.push({
+        x: (Math.random() - 0.5) * 1200,
+        y: (Math.random() - 0.5) * 900,
+        z: 800, 
+        size: Math.random() * 20 + 18, 
+        speed: Math.random() * 3 + 5 + (score * 0.05)
+    });
 }
 
 function resetGame() {
-    clearTimeout(asteroidTimer);
-
-    lasers.forEach(l => scene.remove(l));
-    asteroids.forEach(a => scene.remove(a));
-    lasers.length = 0;
-    asteroids.length = 0;
-    
     score = 0;
     gameOver = false;
+    lasers.length = 0;
+    asteroids.length = 0;
     document.getElementById('current-score').innerText = score;
     document.getElementById('gameover-screen').style.display = 'none';
-    
-    playerGroup.position.set(0, 0, -5);
-    
-    spawnAsteroid();
 }
 
-// --- Frame Engine Loop ---
+// --- Frame Rendering Engine Loop ---
 function animate() {
     requestAnimationFrame(animate);
 
-    // FOOLPROOF ALIGNMENT: Shoot ray out from camera position to calculate real intersections
-    raycaster.setFromCamera(mouse, camera);
-    raycaster.ray.intersectPlane(movementPlane, targetWorldPosition);
+    // Deep space backdrop
+    ctx.fillStyle = '#020208';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    // 1. Draw Starfield Matrix
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < stars.length; i++) {
+        let s = stars[i];
+        s.z -= 4; 
+        if (s.z <= 0) s.z = 800; 
+
+        let sx = (s.x / s.z) * FOV + cx;
+        let sy = (s.y / s.z) * FOV + cy;
+        let scale = (1 - s.z / 800) * 2.5;
+
+        if (sx >= 0 && sx <= canvas.width && sy >= 0 && sy <= canvas.height) {
+            ctx.fillRect(sx, sy, scale, scale);
+        }
+    }
+
+    // 2. Draw Lasers
+    for (let i = lasers.length - 1; i >= 0; i--) {
+        let l = lasers[i];
+        l.z += l.speed; 
+
+        let lx = (l.x / l.z) * FOV + cx;
+        let ly = (l.y / l.z) * FOV + cy;
+        let lRadius = (1 - l.z / 800) * 10;
+        if (lRadius < 1) lRadius = 1;
+
+        ctx.fillStyle = '#ff0055';
+        ctx.beginPath();
+        ctx.arc(lx, ly, Math.max(1, lRadius), 0, Math.PI * 2);
+        ctx.fill();
+
+        if (l.z > 800) {
+            lasers.splice(i, 1);
+        }
+    }
+
+    // 3. Spawning Tracker Loop
+    if (!gameOver) {
+        spawnTimer++;
+        let spawnRate = Math.max(10, 30 - score * 0.3);
+        if (spawnTimer > spawnRate) {
+            spawnAsteroid();
+            spawnTimer = 0;
+        }
+    }
+
+    // 4. Draw & Calculate Asteroids
+    for (let i = asteroids.length - 1; i >= 0; i--) {
+        let a = asteroids[i];
+        a.z -= a.speed; 
+
+        let ax = (a.x / a.z) * FOV + cx;
+        let ay = (a.y / a.z) * FOV + cy;
+        let aRadius = (FOV / a.z) * a.size; 
+
+        if (a.z > 0) {
+            ctx.fillStyle = '#32323a';
+            ctx.strokeStyle = '#5a5a66';
+            ctx.lineWidth = Math.max(1, (1 - a.z/800) * 3);
+            ctx.beginPath();
+            ctx.arc(ax, ay, Math.max(1, aRadius), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Laser Intersections (Calculates true vector tracking space)
+            for (let j = lasers.length - 1; j >= 0; j--) {
+                let l = lasers[j];
+                let dist3D = Math.hypot(l.x - a.x, l.y - a.y, l.z - a.z);
+                
+                if (dist3D < a.size * 1.6) { 
+                    asteroids.splice(i, 1);
+                    lasers.splice(j, 1);
+                    score += 10;
+                    document.getElementById('current-score').innerText = score;
+                    break;
+                }
+            }
+
+            // CRITICAL TRACKING LOCK: Direct structural check matching crosshair position values
+            if (!gameOver && a.z <= PLANE_Z + 10 && a.z >= PLANE_Z - 10) {
+                let hitDist = Math.hypot(mouse.x - a.x, mouse.y - a.y);
+                if (hitDist < a.size + 10) { 
+                    gameOver = true;
+                    document.getElementById('final-score').innerText = `Final Score: ${score}`;
+                    if (score > highScore) {
+                        highScore = score;
+                        document.getElementById('high-score-hud').innerText = highScore;
+                        document.getElementById('high-score-notice').style.display = 'block';
+                    } else {
+                        document.getElementById('high-score-notice').style.display = 'none';
+                    }
+                    document.getElementById('gameover-screen').style.display = 'block';
+                }
+            }
+        }
+
+        if (a.z <= PLANE_Z - 10) {
+            asteroids.splice(i, 1);
+        }
+    }
+
+    // 5. Draw 3D Player Starship (Glued right to the mouse screen tracking vectors)
+    if (!gameOver) {
+        let px = mouse.screenX;
+        let py = mouse.screenY;
+
+        ctx.fillStyle = '#00ffcc';
+        ctx.strokeStyle = '#0088cc';
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(px, py - 16); 
+        ctx.lineTo(px - 24, py + 14); 
+        ctx.lineTo(px, py + 5); 
+        ctx.lineTo(px + 24, py + 14); 
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        
+        // Reticle alignment system
+        ctx.strokeStyle = 'rgba(0, 255, 204, 0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(px, py, 26, 0, Math.PI * 2);
+        ctx.moveTo(px - 36, py); ctx.lineTo(px - 12, py);
+        ctx.moveTo(px + 12, py); ctx.lineTo(px + 36, py);
+        ctx.moveTo(px, py - 36); ctx.lineTo(px, py - 12);
+        ctx.moveTo(px, py + 12); ctx.lineTo(px, py + 36);
+        ctx.stroke();
+    }
+}
+
+animate();
+</script>
+</body>
+</html>
