@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Space Shooter - Shield-Proof Edition</title>
+    <title>3D Space Shooter - Pure Arcade Edition</title>
     <style>
         html, body {
             margin: 0;
@@ -33,7 +33,6 @@
             font-weight: bold;
             pointer-events: none;
             text-shadow: 0 0 8px rgba(0,255,220,0.6);
-            line-height: 1.5;
             z-index: 10;
         }
         #gameover-screen {
@@ -60,14 +59,12 @@
 <body>
 
     <div id="hud">
-        SCORE: <span id="current-score">0</span><br>
-        HIGH SCORE: <span id="high-score-hud">0</span>
+        SCORE: <span id="current-score">0</span>
     </div>
     
     <div id="gameover-screen">
         <h1>GAME OVER</h1>
         <p id="final-score">Final Score: 0</p>
-        <p id="high-score-notice" style="color: #00ffcc; font-weight: bold; display: none;">NEW HIGH SCORE!</p>
         <p style="font-size: 16px; color: #888; margin-top: 20px;">Click anywhere to restart</p>
     </div>
 
@@ -84,21 +81,20 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// --- Game Settings & Core 3D Projection Matrices ---
+// --- Core Game Variables ---
 let score = 0;
-let highScore = 0; 
 let gameOver = false;
 let spawnTimer = 0;
 
 const FOV = 350; 
-const PLANE_Z = 30; // Matrix focal plane for alignment targeting
+const PLANE_Z = 30; 
 
 const mouse = { x: 0, y: 0, screenX: window.innerWidth / 2, screenY: window.innerHeight / 2 };
 const stars = [];
 const lasers = [];
 const asteroids = [];
 
-// Starfield array mapping
+// Populate Star Backdrop
 for (let i = 0; i < 250; i++) {
     stars.push({
         x: (Math.random() - 0.5) * 2500,
@@ -107,12 +103,12 @@ for (let i = 0; i < 250; i++) {
     });
 }
 
+// Pixel-Perfect Screen Mouse Alignment Mapping
 window.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
     mouse.screenX = e.clientX - rect.left;
     mouse.screenY = e.clientY - rect.top;
     
-    // RAYCAST SIMULATION: Maps screen space dimensions directly to focal vectors
     mouse.x = (mouse.screenX - canvas.width / 2) * (PLANE_Z / FOV);
     mouse.y = (mouse.screenY - canvas.height / 2) * (PLANE_Z / FOV);
 });
@@ -149,18 +145,17 @@ function resetGame() {
     document.getElementById('gameover-screen').style.display = 'none';
 }
 
-// --- Frame Rendering Engine Loop ---
+// --- Main Engine Loop ---
 function animate() {
     requestAnimationFrame(animate);
 
-    // Deep space backdrop
     ctx.fillStyle = '#020208';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
 
-    // 1. Draw Starfield Matrix
+    // Render Moving Starfield Backdrop
     ctx.fillStyle = '#ffffff';
     for (let i = 0; i < stars.length; i++) {
         let s = stars[i];
@@ -176,7 +171,7 @@ function animate() {
         }
     }
 
-    // 2. Draw Lasers
+    // Process & Render Projectiles
     for (let i = lasers.length - 1; i >= 0; i--) {
         let l = lasers[i];
         l.z += l.speed; 
@@ -184,7 +179,6 @@ function animate() {
         let lx = (l.x / l.z) * FOV + cx;
         let ly = (l.y / l.z) * FOV + cy;
         let lRadius = (1 - l.z / 800) * 10;
-        if (lRadius < 1) lRadius = 1;
 
         ctx.fillStyle = '#ff0055';
         ctx.beginPath();
@@ -196,7 +190,7 @@ function animate() {
         }
     }
 
-    // 3. Spawning Tracker Loop
+    // Dynamic Asteroid Spawning System
     if (!gameOver) {
         spawnTimer++;
         let spawnRate = Math.max(10, 30 - score * 0.3);
@@ -206,7 +200,7 @@ function animate() {
         }
     }
 
-    // 4. Draw & Calculate Asteroids
+    // Handle Hazard Matrices and Collision Maps
     for (let i = asteroids.length - 1; i >= 0; i--) {
         let a = asteroids[i];
         a.z -= a.speed; 
@@ -224,7 +218,7 @@ function animate() {
             ctx.fill();
             ctx.stroke();
 
-            // Laser Intersections (Calculates true vector tracking space)
+            // Laser Intersection Loops
             for (let j = lasers.length - 1; j >= 0; j--) {
                 let l = lasers[j];
                 let dist3D = Math.hypot(l.x - a.x, l.y - a.y, l.z - a.z);
@@ -238,19 +232,12 @@ function animate() {
                 }
             }
 
-            // CRITICAL TRACKING LOCK: Direct structural check matching crosshair position values
+            // Target Vector Collision Tracking
             if (!gameOver && a.z <= PLANE_Z + 10 && a.z >= PLANE_Z - 10) {
                 let hitDist = Math.hypot(mouse.x - a.x, mouse.y - a.y);
                 if (hitDist < a.size + 10) { 
                     gameOver = true;
                     document.getElementById('final-score').innerText = `Final Score: ${score}`;
-                    if (score > highScore) {
-                        highScore = score;
-                        document.getElementById('high-score-hud').innerText = highScore;
-                        document.getElementById('high-score-notice').style.display = 'block';
-                    } else {
-                        document.getElementById('high-score-notice').style.display = 'none';
-                    }
                     document.getElementById('gameover-screen').style.display = 'block';
                 }
             }
@@ -261,7 +248,7 @@ function animate() {
         }
     }
 
-    // 5. Draw 3D Player Starship (Glued right to the mouse screen tracking vectors)
+    // Render Ship Interface Framework Connected to Mouse Vectors
     if (!gameOver) {
         let px = mouse.screenX;
         let py = mouse.screenY;
