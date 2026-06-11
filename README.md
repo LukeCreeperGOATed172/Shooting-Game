@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Space Shooter</title>
+    <title>3D Cockpit Space Shooter</title>
     <style>
         html, body {
             margin: 0;
@@ -11,7 +11,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background-color: #020208;
+            background-color: #03030c;
             font-family: 'Courier New', Courier, monospace;
             user-select: none;
         }
@@ -43,7 +43,7 @@
             color: #ff0055;
             text-align: center;
             display: none;
-            background: rgba(5, 5, 15, 0.95);
+            background: rgba(4, 4, 12, 0.95);
             padding: 35px;
             border: 2px solid #ff0055;
             border-radius: 10px;
@@ -62,7 +62,7 @@
     </div>
     
     <div id="gameover-screen">
-        <h1>GAME OVER</h1>
+        <h1>SHIP DESTROYED</h1>
         <p id="final-score">Final Score: 0</p>
         <p id="high-score-notice" style="color: #00ffcc; font-weight: bold; display: none;">NEW HIGH SCORE!</p>
         <p style="font-size: 16px; color: #888; margin-top: 20px; font-weight: bold;">CLICK ANYWHERE TO RESTART</p>
@@ -74,7 +74,6 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// Forces absolute pixel dimensions based on the window size
 function resize() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -82,47 +81,58 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// --- Game Variables ---
+// --- Game Settings & State ---
 let score = 0;
 let highScore = 0; 
 let gameOver = false;
 let spawnTimer = 0;
 
-const mouse = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+// FOV and perspective warp settings
+const FOV = 400; 
+const PLAYER_Z = 20; // The depth plane where your player ship physically exists
+
+const mouse = { x: 0, y: 0 };
 const stars = [];
 const lasers = [];
 const asteroids = [];
 
-// Initialize Starfield Depth Matrix
-for (let i = 0; i < 200; i++) {
+// Generate stars with localized 3D coordinate vectors
+for (let i = 0; i < 300; i++) {
     stars.push({
-        x: (Math.random() - 0.5) * 2000,
+        x: (Math.random() - 0.5) * 3000,
         y: (Math.random() - 0.5) * 2000,
         z: Math.random() * 1000
     });
 }
 
-// Track inputs relative to actual screen
 window.addEventListener('mousemove', (e) => {
-    mouse.x = e.clientX;
-    mouse.y = e.clientY;
+    // Translate mouse screen pixels into actual 3D virtual coordinates
+    mouse.x = (e.clientX - canvas.width / 2) * (PLAYER_Z / FOV);
+    mouse.y = (e.clientY - canvas.height / 2) * (PLAYER_Z / FOV);
 });
 
 window.addEventListener('click', () => {
     if (gameOver) {
         resetGame();
     } else {
-        lasers.push({ x: mouse.x, y: mouse.y, z: 10 });
+        // Fire laser directly out of the ship's 3D positioning
+        lasers.push({
+            x: mouse.x,
+            y: mouse.y,
+            z: PLAYER_Z,
+            speed: 25
+        });
     }
 });
 
 function spawnAsteroid() {
+    // Spawns targets wildly distributed across real far-off 3D space dimensions
     asteroids.push({
-        x: (Math.random() - 0.5) * canvas.width * 2,
-        y: (Math.random() - 0.5) * canvas.height * 2,
-        z: 1000,
-        size: Math.random() * 30 + 20,
-        speed: Math.random() * 4 + 5 + (score * 0.1)
+        x: (Math.random() - 0.5) * 1500,
+        y: (Math.random() - 0.5) * 1000,
+        z: 1000, 
+        size: Math.random() * 25 + 20, 
+        speed: Math.random() * 4 + 6 + (score * 0.08)
     });
 }
 
@@ -135,146 +145,47 @@ function resetGame() {
     document.getElementById('gameover-screen').style.display = 'none';
 }
 
-// --- Game Loop ---
+// --- Main Engine Loop ---
 function animate() {
     requestAnimationFrame(animate);
 
-    // Dynamic fallback safeguard: If canvas loses size, force recalculation
-    if (canvas.width === 0 || canvas.height === 0) {
-        resize();
-    }
-
-    // Paint Background Space
-    ctx.fillStyle = '#020208';
+    // Render dark space vacuum background
+    ctx.fillStyle = '#03030c';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    // Calculate center origin viewpoint matrix
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
 
-    // 1. Render Starfield 
+    // 1. Render 3D Background Stars
     ctx.fillStyle = '#ffffff';
     for (let i = 0; i < stars.length; i++) {
         let s = stars[i];
-        s.z -= 4; 
+        s.z -= 5; 
         if (s.z <= 0) s.z = 1000; 
 
-        let sx = (s.x / s.z) * cx + cx;
-        let sy = (s.y / s.z) * cy + cy;
-        let size = (1 - s.z / 1000) * 3;
+        // Matrix transformations project 3D coordinate properties into flat screen values
+        let sx = (s.x / s.z) * FOV + cx;
+        let sy = (s.y / s.z) * FOV + cy;
+        let scale = (1 - s.z / 1000) * 2.5;
 
         if (sx >= 0 && sx <= canvas.width && sy >= 0 && sy <= canvas.height) {
-            ctx.fillRect(sx, sy, size, size);
+            ctx.fillRect(sx, sy, scale, scale);
         }
     }
 
-    // 2. Render Lasers
-    ctx.fillStyle = '#ff0055';
+    // 2. Update and Track Lasers
     for (let i = lasers.length - 1; i >= 0; i--) {
         let l = lasers[i];
-        l.z += 20; 
+        l.z += l.speed; // Fly deep into the horizon
 
-        let lRadius = (1 - l.z / 1000) * 8;
+        let lx = (l.x / l.z) * FOV + cx;
+        let ly = (l.y / l.z) * FOV + cy;
+        let lRadius = (1 - l.z / 1000) * 12;
         if (lRadius < 1) lRadius = 1;
 
+        ctx.fillStyle = '#ff0055';
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#ff0055';
         ctx.beginPath();
-        ctx.arc(l.x, l.y, lRadius, 0, Math.PI * 2);
-        ctx.fill();
-
-        if (l.z > 1000) {
-            lasers.splice(i, 1);
-        }
-    }
-
-    // 3. Render Asteroids
-    if (!gameOver) {
-        spawnTimer++;
-        let spawnRate = Math.max(12, 40 - score * 0.5);
-        if (spawnTimer > spawnRate) {
-            spawnAsteroid();
-            spawnTimer = 0;
-        }
-    }
-
-    for (let i = asteroids.length - 1; i >= 0; i--) {
-        let a = asteroids[i];
-        a.z -= a.speed; 
-
-        let ax = (a.x / a.z) * cx + cx;
-        let ay = (a.y / a.z) * cy + cy;
-        let aSize = (1 - a.z / 1000) * a.size * 2;
-
-        if (aSize < 0) aSize = 0;
-
-        if (a.z > 0) {
-            ctx.fillStyle = '#44444a';
-            ctx.strokeStyle = '#666670';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(ax, ay, aSize, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-
-            // Laser hit checks
-            for (let j = lasers.length - 1; j >= 0; j--) {
-                let l = lasers[j];
-                let dist = Math.hypot(l.x - ax, l.y - ay);
-                if (dist < aSize && a.z > 100) { 
-                    asteroids.splice(i, 1);
-                    lasers.splice(j, 1);
-                    score += 10;
-                    document.getElementById('current-score').innerText = score;
-                    break;
-                }
-            }
-
-            // Player crash check
-            if (a.z < 30) {
-                let playerDist = Math.hypot(mouse.x - ax, mouse.y - ay);
-                if (playerDist < aSize + 20) {
-                    gameOver = true;
-                    document.getElementById('final-score').innerText = `Final Score: ${score}`;
-                    if (score > highScore) {
-                        highScore = score;
-                        document.getElementById('high-score-hud').innerText = highScore;
-                        document.getElementById('high-score-notice').style.display = 'block';
-                    } else {
-                        document.getElementById('high-score-notice').style.display = 'none';
-                    }
-                    document.getElementById('gameover-screen').style.display = 'block';
-                }
-            }
-        }
-
-        if (a.z <= 0) {
-            asteroids.splice(i, 1);
-        }
-    }
-
-    // 4. Render Player Craft
-    if (!gameOver) {
-        ctx.fillStyle = '#00ffcc';
-        ctx.strokeStyle = '#0088cc';
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(mouse.x, mouse.y - 15);
-        ctx.lineTo(mouse.x - 25, mouse.y + 15);
-        ctx.lineTo(mouse.x, mouse.y + 5);
-        ctx.lineTo(mouse.x + 25, mouse.y + 15);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        
-        ctx.strokeStyle = 'rgba(0, 255, 204, 0.15)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(mouse.x, mouse.y, 35, 0, Math.PI*2);
-        ctx.stroke();
-    }
-}
-
-// Spark loop engine
-animate();
-</script>
-</body>
-</html>
+        ctx.arc(lx, ly, lRadius, 0, Math.PI * 2);
